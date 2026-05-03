@@ -26,3 +26,17 @@ Schema: `atom_attachments` table (lines ~274–288 in `loom-schema-v1.sql`). Key
 Do NOT confuse `DELETE /v1/atom-attachments/:id` (hard delete of the attachment row) with dismissal (which is a soft operation in #018 that sets `dismissed = true` and records a reason).
 
 Route: `POST /v1/atom-attachments`, `DELETE /v1/atom-attachments/:id`, `PATCH /v1/atom-attachments/:id`, `GET /v1/hypotheses/:id/attachments`.
+
+---
+
+## v0.8 Alignment Addendum
+
+**Depends on:** #076 (schema), #077 (Audience), #083 (forward provenance)
+
+### Additional acceptance criteria
+
+- [ ] Attaching an atom records a forward-provenance row via `record_contribution` (#083) with `consumer_type = 'state_change'` if the attach event triggers a downstream state change. (For pure attaches without state change, no contribution row — contribution is recorded by the consumer that actually uses the atom.)
+- [ ] On attach, the atom's `visibility_scope` is reconciled with the hypothesis's: if the atom was `private` (pre-attachment default), it transitions to the hypothesis's scope (typically `engagement_scoped`). The transition is logged.
+- [ ] `GET /v1/hypotheses/:id/attachments` takes a required audience parameter via the visibility-aware read-path retrofit (#078); attachments with `visibility_scope` not visible to the audience are excluded.
+- [ ] Attaching a retracted atom (#084) returns 409 with reason `atom_retracted`.
+

@@ -28,3 +28,21 @@ The key difference from confidence: the LLM needs atom timestamps to assess velo
 Lives in `loom-core/src/loom_core/pipelines/inference/momentum.py`.
 
 The three inference engines (progress, confidence, momentum) are run sequentially per hypothesis during the `state_inference` cron job (#026), not in parallel, to avoid concurrent writes to the same `hypotheses` row.
+
+---
+
+## v0.8 Alignment Addendum
+
+**Depends on:** #076, #080 (cognition router), #081, #083
+
+Momentum inference inherits the same v0.8 disciplines as confidence (#024 amendment): cognition router, adversarial-input wrapping, model-version metadata, privacy gate, forward provenance.
+
+### Additional acceptance criteria
+
+- [ ] Calls go through `CognitionRouter.call_stage(stage='hypothesis_momentum', ...)`.
+- [ ] Atom contents wrapped via `wrap_untrusted` before inclusion in the prompt.
+- [ ] Proposal row populates `inference_provider`, `inference_model_version`, `inference_skill_version`.
+- [ ] Privacy gate honoured — private-atom hypothesis stays on apple_fm.
+- [ ] Retracted atoms excluded.
+- [ ] `record_contribution(consumer_type='state_change')` writes for atoms in the inference prompt.
+

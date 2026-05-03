@@ -26,3 +26,18 @@ Schema: `atoms.dismissed`, `atoms.dismissed_at`, `atoms.dismissal_reason` (lines
 "Global dismiss" (dismiss the atom itself) vs. "scoped dismiss" (dismiss the attachment) are distinct operations. A globally dismissed atom disappears from all hypotheses' triage views. A scoped dismiss removes it from one hypothesis's view only.
 
 The PRD notes: "dismissed flag on atoms and atom_attachments is soft (training signal)." Never hard-delete dismissed rows.
+
+---
+
+## v0.8 Alignment Addendum
+
+**Depends on:** #084 (retraction)
+
+Dismissal and retraction are distinct workflows. Dismissal says "this fact is not relevant to my workflow right now" — it stays in the substrate as training signal. Retraction (#084) says "this fact is wrong" — it cascades through forward provenance and triggers brief regen + draft review. Most user-initiated cleanup is dismissal; retraction is reserved for hallucinations and wrong extractions.
+
+### Additional acceptance criteria
+
+- [ ] When `dismissal_reason` is `'hallucination'` or `'wrong_extraction'`, the dismissal endpoint also calls the retraction service (#084) automatically. The dismissal records the user intent; the retraction handles the cascade.
+- [ ] When `dismissal_reason` is `'not_relevant'` or `'duplicate'` or any non-correctness reason, no retraction is triggered — atom stays as soft-deleted training signal.
+- [ ] Dismissal records still emit a training signal to the cognition self-improvement loop, separately from retraction signals.
+

@@ -203,7 +203,7 @@ These decisions are settled. They do not get re-litigated during implementation.
 - **HTTP/1.1 over localhost** for inter-process IPC (Loom UI ↔ Loom Core, MCP server ↔ Loom Core, Loom Core ↔ Apple AI sidecar). Stdio only for Claude Desktop ↔ MCP server.
 - **Events are immutable.** No PATCH or DELETE on events. Atoms can be revised pre-attachment; commitments/asks/risks have lifecycle status updates that write `atom_status_changes` rows.
 - **Soft delete only** for dismissals and closures. Hard deletes reserved for retention triggers and explicit NDA-driven hard-deletes.
-- **Polymorphic references via `(entity_type, entity_id)` pairs** in `entity_pages`, `entity_tags`, `triage_items`, `work_stakeholder_roles.scope_id`. Loom Core enforces referential integrity at write time (SQLite cannot).
+- **Polymorphic references via `(entity_type, entity_id)` pairs** in `entity_pages`, `entity_tags`, `triage_items`, `stakeholder_roles.scope_id`, `atom_contributions.consumer_id`, `entity_visibility_members.entity_id`. Loom Core enforces referential integrity at write time (SQLite cannot).
 - **Domain is a first-class column** on every entity. Privacy is enforced at the query layer.
 
 ### 6.3 Vault layout
@@ -439,9 +439,73 @@ How the work decomposes into roughly-orthogonal tracks. Each workstream produces
 
 **Trigger:** at the end of W4 (triage core complete).
 
+**Status (May 2026):** Superseded by W15–W18. The v0.8 alignment refactor (executed early because Loom is being repositioned as the structural store under Personal OS / Life OS) is the architecture-review output. See #075 (marked superseded) and #092 (blueprint reconciliation).
+
+### W15. v0.8 alignment — schema + visibility (Phase A)
+
+**Goal:** Bring loom-core into structural alignment with Personal OS blueprint v0.8. Single consolidated schema migration adds visibility, retention, projection-at-creation, model-version metadata, role periods, audience profile, forward-provenance, and resources. Visibility filter library lands as the canonical implementation; every read path uses it. Visibility regression tests join the CI gates.
+
+**Issues, rough count:** 4
+- #076 v0.8 consolidated schema migration (HITL — touches every operational table)
+- #077 visibility filter library + Audience type
+- #078 read-path retrofit (audience-aware reads across 7 service files)
+- #079 visibility regression test suite + new CI gate
+
+**Verification gate:** `pytest -m visibility` passes; `alembic check` passes; `python -m loom_core.cli doctor` passes post-migration.
+
+**User stories addressed:** none directly (foundational); unblocks every downstream user story by establishing the privacy boundary structurally.
+
+### W16. v0.8 alignment — cognition + accountability (Phase B)
+
+**Goal:** Fill the empty `llm/` module with the cognition router, provider adapters, adversarial-input handling, and extraction discipline. Forward provenance (`atom_contributions`) writes on every consumer. Atom retraction endpoint cascades through forward provenance.
+
+**Issues, rough count:** 5
+- #080 cognition module skeleton (router, providers, routing-policy.yaml)
+- #081 adversarial input boundary tags + system instruction
+- #082 extraction discipline (confidence + source-grounding)
+- #083 forward-provenance writes (atom_contributions on every consumer)
+- #084 atom retraction endpoint + cascade walk
+
+**Verification gate:** all four CI gates plus visibility regression. Privacy-gate test asserts a private event never reaches Claude API.
+
+**User stories addressed:** US-15 (extends override-as-training-signal with retraction-as-correction), and unblocks W3 atom extractors (#010–#012 amendments) and W5 state inference (#023–#026 amendments).
+
+### W17. v0.8 alignment — resources + standards + roles (Phase C)
+
+**Goal:** Land the leverage layer (resources + attribution), the standards module (with 1CloudHub brand seed + sunset policy), and the projection-agnostic stakeholder roles + audience profile. Brief composition gains a leverage section.
+
+**Issues, rough count:** 4
+- #085 resources entities + time/people inference
+- #086 resource attribution + brief leverage section
+- #087 standards module + 1CloudHub brand seed + sunset policy
+- #088 stakeholder roles (time-bounded) + audience profile (replaces #039)
+
+**Verification gate:** all four CI gates. Leverage-section integration test asserts audience filtering on resource attributions.
+
+**User stories addressed:** US-18, US-22 (extends brief content with leverage), US-27, US-29 (re-implements with v0.8 model — replaces #039).
+
+### W18. v0.8 alignment — operations rigor (Phase D)
+
+**Goal:** Append-only operations log, idempotency-key middleware, and the quarterly routing-matrix audit. Closes the loop on §11.9 (operations are idempotent and replayable) and §13.4 (cognition routing matrix drift detection).
+
+**Issues, rough count:** 3
+- #089 operations log (JSONL append + replay-on-startup)
+- #090 idempotency-key middleware + cache
+- #091 quarterly routing-matrix audit job
+
+**Verification gate:** all four CI gates plus operations-log shape validation.
+
+**User stories addressed:** none directly (operational hardening).
+
+### Architecture decomposition (v0.8 alignment)
+
+The v0.8 alignment consciously deviates from the original blueprint's polyglot decomposition. v1 ships as **single Python service (loom-core) + msgvault Swift services + desktop/mobile Swift apps + web-clipper TS extension** — polyglot count of 3, not 4. Cognition, contacts, and standards live as **modules inside loom-core** for v1; extracted to separate services in v2 if rule volume / extraction load justify it. Sequencing: W15 lands first (schema unblocker), then W16 in parallel with resumption of W3, then W17, then W18. See `docs/v08-blueprint-reconciliation.md` (lands in #092) for the full reconciliation note.
+
 ### Workstream rough total
 
-~75–100 issues across 14 workstreams. Most are AFK; HITL exceptions are flagged in §9 below.
+~92–117 issues across 18 workstreams (W1–W14 original plus W15–W18 v0.8 alignment). Most are AFK; HITL exceptions are flagged in §9 below.
+
+W15–W18 add 17 new issues (#076–#092) plus addenda to 14 existing issues (#010, #011, #012, #013, #017, #018, #023, #024, #025, #026, #035, #036, #038, #075). Issue #039 is replaced by #088.
 
 ---
 
@@ -556,6 +620,9 @@ uv run ruff check
 uv run ruff format --check
 uv run mypy --strict
 uv run pytest
+uv run pytest -m visibility    # v0.8 alignment (W15) — visibility regression tests
+uv run alembic check           # v0.8 alignment (W15) — ORM matches latest migration head
+uv run pytest -m operations_log # v0.8 alignment (W18) — operations log shape validation
 
 # loom-mcp
 uv run ruff check
@@ -607,6 +674,8 @@ These are reproduced from `loom-system-design-v1.md` §15. They are the contract
 | R8 | **External advocate confidence inferences become load-bearing.** "Madhavan is hardening" gets cited in decisions. | Strict enforcement of blueprint principle: confidence is interpretive, never persisted to archive (CRO projection §5). |
 | R9 | **Email-based atom extraction is noisy.** Recall-favouring extraction on email produces more noise than transcripts. | Acceptable v1 trade-off; triage absorbs cost. Re-evaluate in v2. |
 | R10 | **Single-writer bottleneck under cron load.** Multiple cron jobs converge at 7am brief generation while inbox sweep runs. | One uvicorn worker is intentional. APScheduler serialises in-process. SQLite WAL mode handles concurrent reads. Watch P99 in `loom doctor`. |
+| R11 | **Cognition module growth pressure.** If prompt iteration volume is high, the in-process cognition module (W16) may slow API responses or complicate deployment. | v2 extraction path is documented in #092 (blueprint reconciliation). Cost meter (in #080) provides early warning if Claude API spend or latency crosses thresholds; trigger to extract is a measurement, not an opinion. |
+| R12 | **Apple FM HTTP API stability dependency.** W16 Tier 3 cognition (and W17 leverage inference reading calendar archive) depend on msgvault-comms exposing FM and calendar over HTTP. If msgvault is not yet shipping this surface, W16 ships with Tier 1 + Tier 4 only and W17 falls back to manual seed for time resources. | Coordinate with msgvault-comms changes; gate W16/#080 Tier 3 work on the HTTP API being stable. Privacy gate (#080) explicitly raises `LocalOnlyUnavailableError` when Tier 3 is needed but unavailable, rather than silently downshifting to cloud. |
 
 ---
 

@@ -9,7 +9,7 @@ Internal HTTP API exposed by the Loom Core daemon. Consumed by the MCP server (w
 ### Base URL
 `http://127.0.0.1:9100/v1`
 
-The daemon binds to `127.0.0.1` only. Port `9100` chosen to avoid common conflicts; configurable via `~/.loom/config.toml`.
+The daemon binds to `127.0.0.1` only. Port `9100` chosen to avoid common conflicts; configurable via `~/Library/Application Support/Loom/config.toml`.
 
 ### Authentication
 None in v1. The daemon is localhost-bound and the threat model is "another local user on the same Mac" — controllable by the user. A shared-secret bearer token is a v2 hardening option (passed as `Authorization: Bearer <token>` from a config file readable only by the user).
@@ -48,6 +48,9 @@ Multiple values comma-separated: `?type=commitment,ask`. Time ranges via ISO 860
 ### Domain scoping
 Most endpoints accept `?domain=work` to scope. v1 has only `work`; the parameter is reserved for forward-compatibility. Omitting `domain` defaults to the user's default domain (configurable, currently `work`).
 
+### Audience and visibility (v0.8)
+Read endpoints that return facts accept an optional `?audience=self` (default) or `?audience=stakeholder:<id>,<id>,...` query parameter. The server applies visibility filtering at the SQL layer before returning results — facts the audience cannot see are never included in the response. `audience=self` means Phani (the owner); it sees everything in the domain. This parameter is used when generating stakeholder-specific briefs or composing audience-targeted drafts.
+
 ### Errors
 Standard HTTP status codes. Body shape:
 ```json
@@ -81,7 +84,7 @@ Every response carries an `X-Request-Id` header (ULID). Logged on the server. In
 ### Arenas
 
 `GET /arenas` — list arenas.
-- Query: `?domain=work&closed=false&q=<n>`
+- Query: `?domain=work&closed=false&q=<name>`
 - Response: paginated list
 
 `GET /arenas/{id}` — get one arena (with metadata join from `work_account_metadata`).
@@ -97,7 +100,7 @@ Every response carries an `X-Request-Id` header (ULID). Logged on the server. In
 ### Engagements
 
 `GET /engagements` — list.
-- Query: `?domain=work&arena_id=<id>&arena_name=<n>&closed=false&type_tag=delivery_wave`
+- Query: `?domain=work&arena_id=<id>&arena_name=<name>&closed=false&type_tag=delivery_wave`
 - The `arena_name` convenience parameter resolves to `arena_id`; helpful for MCP calls that reach the API by name.
 
 `GET /engagements/{id}` — get one (with `work_engagement_metadata` joined).
@@ -198,6 +201,13 @@ Every response carries an `X-Request-Id` header (ULID). Logged on the server. In
 
 `POST /atoms/{id}/undismiss` — restore. Body: `{ "scope": "...", "attachment_id"?: "..." }`.
 
+`POST /atoms/{id}/retract` — retract an atom and cascade through forward provenance. (v0.8)
+- Body: `{ "reason": "hallucination" | "wrong_extraction" | "stale_source" | "corrected_on_review" }`
+- Effect: marks `atoms.retracted = true`; walks `atom_contributions` to find all consumers; flags affected `brief_runs` for regeneration; surfaces affected drafts and sent actions in the triage queue for review; walks transitively through `derived_atom` contributions (cycle-safe); emits a training signal for the extractor that produced the atom; appends to the operations log.
+- Response: `{ "atom_id": "...", "retraction_reason": "...", "affected_briefs": [...], "affected_drafts": [...], "affected_state_changes": [...], "affected_sent_actions": [...], "affected_derived_atoms": [...] }`
+- 409 if the atom is already retracted.
+- Note: retraction differs from dismissal — retraction invalidates the atom's downstream contributions; dismissal merely removes it from triage.
+
 `GET /atoms/{id}/provenance` — returns the source content for the atom.
 ```json
 {
@@ -252,16 +262,51 @@ Every response carries an `X-Request-Id` header (ULID). Logged on the server. In
 
 `POST /stakeholders/{id}/merge`
 - Body: `{ "merge_into_id": "<other_stakeholder_id>", "reason": "duplicate created during migration" }`
-- Effect: rewrites all FKs (atoms, attachments, work_stakeholder_roles) from `{id}` to `merge_into_id`, then deletes `{id}`. Atomic transaction.
+- Effect: rewrites all FKs (atoms, attachments) from `{id}` to `merge_into_id`, then deletes `{id}`. Atomic transaction.
+- Note: `work_stakeholder_roles` is dropped by #076 and not part of FK rewriting. New v0.8 tables holding stakeholder FKs (`stakeholder_roles`, `atom_contributions`, `entity_visibility_members`) will be added to this list when #076 lands.
 
 `GET /stakeholders/{id}/atoms` — atoms where this stakeholder is owner (commitment/ask) or referenced.
 
 `GET /stakeholders/{id}/roles?domain=work` — role attachments scoped to a domain.
 
-`POST /stakeholders/{id}/roles`
-- Body: `{ "domain": "work", "scope_type": "engagement", "scope_id": "...", "role": "internal_advocate", "effective_from": "..." }`
+`POST /stakeholders/{id}/roles` (v0.8 — uses `stakeholder_roles` table)
+- Body: `{ "domain": "work", "scope_type": "engagement" | "arena" | "domain", "scope_id": "...", "role": "sponsor" | "beneficiary" | "blocker" | "validator" | "advocate" | "doer" | "influencer" | "advisor" | "decision_maker" | "informed_party", "started_at": "2026-04-01" }`
+- `scope_id` is omitted when `scope_type = "domain"`.
+- `started_at` is required (date only, not timestamp).
+- Role uses the universal 10-role vocabulary from blueprint §4 (Stakeholders). Affiliation (customer-side, AWS partner, 1CloudHub internal, etc.) is captured separately via `entity_tags` with the `aff/` namespace prefix — affiliation is a property of the person, not of the role period. Tagging endpoints land in W7.
 
-`DELETE /stakeholders/{id}/roles/{role_id}` — soft (sets `effective_to`) by default; hard delete via `?hard=true`.
+`POST /stakeholders/{id}/roles/{role_id}/end` (v0.8)
+- Body: `{ "ended_at": "2026-05-31" }`
+- Closes the role period without deleting it (history preserved). Use instead of DELETE for normal role transitions.
+
+`DELETE /stakeholders/{id}/roles/{role_id}` — hard delete only; use sparingly (data entry error correction only).
+
+`PATCH /stakeholders/{id}/audience-profile` (v0.8)
+- Body: `{ "audience_schema": "executive" | "technical" | "aws_partner" | "customer_sponsor" | "visual", "preferred_depth": "...", "preferred_channel": "...", "tone_notes": "..." }` — all fields optional; only provided fields updated.
+- Used by brief composition to select the appropriate narrative schema and depth.
+
+### Resources and leverage (v0.8)
+
+`GET /resources` — list resources.
+- Query: `?domain=work&category=time,people,credibility&since=&audience=self`
+- Returns resources visible to the audience. `inferred_from` field indicates whether the resource was auto-inferred or manually entered.
+
+`GET /resources/{id}` — full resource record including `quality_dimensions` and current attributions.
+
+`POST /resources` — create a resource manually.
+- Body: `{ "domain": "work", "category": "knowledge_asset", "name": "Panasonic Wave 2 case study", "inferred_from": "manual", "visibility_scope": "engagement_scoped" }`
+
+`PATCH /resources/{id}` — update fields. Does not change `inferred_from` to `manual` automatically; caller must set it explicitly if overriding an inference.
+
+`POST /resources/{id}/attribute` — record a resource attribution.
+- Body: `{ "consumer_type": "hypothesis" | "engagement" | "draft" | "sent_action", "consumer_id": "...", "quantity": 4.5, "window_start": "2026-04-01", "window_end": "2026-04-30" }`
+
+`GET /resources/{id}/attributions` — list current and historical attributions for a resource.
+- Query: `?released=false` (default: active only), `?consumer_type=hypothesis`
+
+`GET /resources/summary` — leverage summary for a scope.
+- Query: `?scope_type=engagement&scope_id=<id>&audience=self`
+- Returns aggregated resource picture used in brief leverage sections.
 
 ### Artifacts (notebooks)
 

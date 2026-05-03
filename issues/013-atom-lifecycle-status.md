@@ -25,3 +25,17 @@ Schema: `atom_status_changes` (lines ~259–268), `atom_commitment_details` (lin
 `changed_by` in `atom_status_changes` is a free text field (`'cron' or stakeholder_id`) — not an enum. The atom type determines which detail table is updated; fetching the wrong table for a given atom type should return 422 Not Applicable.
 
 Route: `POST /v1/atoms/:id/status`, `GET /v1/atoms/:id/status/history`, `PATCH /v1/atoms/:id/commitment`, `PATCH /v1/atoms/:id/risk`.
+
+---
+
+## v0.8 Alignment Addendum
+
+**Depends on:** #084 (retraction)
+
+Status transitions are independent of retraction. A retracted atom does NOT auto-cascade status changes — retraction marks the atom unreliable; status changes record what happened to the underlying commitment/ask/risk regardless. The two workflows are separate.
+
+### Additional acceptance criteria
+
+- [ ] When an atom is retracted via #084, status-history endpoints continue to return its history but include a `retracted_at` flag in the response so the UI can mark the atom unreliable in the timeline.
+- [ ] Status transitions on a retracted atom return 409 with reason `atom_retracted` — the human must un-retract first if they want to record a status change post-retraction.
+

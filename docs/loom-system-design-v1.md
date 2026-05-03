@@ -61,7 +61,7 @@ Six logical layers:
 | Claude Desktop | (Anthropic) | User-launched | — |
 | Obsidian | (user-installed) | User-launched or background | — (filesystem only) |
 
-All localhost ports configurable via `~/.loom/config.toml`.
+All localhost ports configurable via `~/Library/Application Support/Loom/config.toml` (full configuration schema in §8).
 
 ### 2.3 Inter-process communication
 
@@ -358,7 +358,7 @@ Full DDL in `loom-schema-v1.sql`. Key facts:
 - **Tables**: 30+ tables organized into five sections (universal core, knowledge graph mirror, migration tracking, work projection, operational tracking).
 - **WAL mode**: enabled for concurrent reads while Loom Core writes.
 - **Partial unique indexes**: enforce atom anchor uniqueness within parent (event or artifact).
-- **Polymorphic references**: `entity_pages`, `entity_tags`, `triage_items`, `work_stakeholder_roles.scope_id` use `(entity_type, entity_id)` pairs; Loom Core enforces referential integrity at write time.
+- **Polymorphic references**: `entity_pages`, `entity_tags`, `triage_items`, `stakeholder_roles.scope_id`, `atom_contributions.consumer_id`, `entity_visibility_members.entity_id` use `(entity_type, entity_id)` pairs; Loom Core enforces referential integrity at write time.
 - **Soft delete**: dismissals (atoms, attachments) and closures (engagements, arenas, hypotheses) are timestamps, not hard deletes. Hard deletes reserved for retention triggers.
 - **Migrations**: Alembic. `PRAGMA user_version` tracks DDL revisions.
 
@@ -401,7 +401,20 @@ Full spec in `loom-api-v1.md`. Key facts:
 - **Versioning**: URL-prefixed (`/v1/`, future `/v2/`)
 - **Real-time**: polling in v1; SSE deferred to v2
 
-The API surface comprises six resource groups (Spine, Evidence, Triage, Briefs, Notebooks, Stakeholders) plus utility endpoints (`/migration`, `/external-references`, `/search`, `/health`, `/domains`).
+The API surface comprises six resource groups (Spine, Evidence, Triage, Briefs, Notebooks, Stakeholders) plus utility endpoints (`/migration`, `/external-references`, `/search`, `/health`, `/domains`, `/resources`).
+
+### 6.1 Visibility model (v0.8)
+
+Every state-bearing entity carries a `visibility_scope` column with four values: `private`, `engagement_scoped`, `stakeholder_set`, `domain_wide`. The rules:
+
+- **`private`** — only Phani (the owner) sees it. Default for pre-attachment events and atoms.
+- **`engagement_scoped`** — visible to all stakeholders with an active role on the parent engagement. Promoted at attachment time.
+- **`stakeholder_set`** — visible to a specific named set, recorded in `entity_visibility_members`.
+- **`domain_wide`** — visible to any audience querying that domain.
+
+**Enforcement rule (blueprint §6.4):** every fact-returning read path applies visibility filtering at the SQL `WHERE` clause level via `loom_core.storage.visibility.visibility_predicate()`. Post-process filtering is never acceptable. Derived facts (atoms extracted from an event, atoms feeding a state change) inherit the most-restrictive scope of their sources via `derived_visibility()`.
+
+When cognition (the `llm/` module) generates a brief or draft, atoms are filtered before reaching the LLM — the LLM never sees content the audience shouldn't see.
 
 ---
 
@@ -721,6 +734,23 @@ A small CLI shipped with Loom Core that runs:
 - Any pending triage items count
 - Any pending migration reviews count
 
+### 11.4 Operations log (v0.8)
+
+An append-only JSONL log at `/var/log/personal-os/loom-core/ops-{date}.jsonl`, rotated daily.
+
+Each line: `{ op_id, op_type, timestamp, service, inputs_hash, status, details }`.
+
+Status values: `started` | `completed` | `failed`.
+
+**Purposes:**
+- Replay on restart: the scheduler reads incomplete (`started` but not `completed`) ops from the last 24h and retries them.
+- Audit trail for retractions, state-change proposals, and migration runs.
+- Forensic debugging without reading the database.
+
+Operations tracked: `inbox_sweep`, `atom_extraction`, `state_inference`, `brief_generation`, `kg_render`, `migration_batch`, `retraction`, `external_ref_verify`, `sqlite_backup`.
+
+Implementation: `loom_core/observability/operations_log.py`. Called at the start and end of every pipeline run and every retraction. Issue #089.
+
 ---
 
 ## 12. Build, test, and development workflow
@@ -777,6 +807,16 @@ The execution-tier matrix from the design phase, reproduced here as the operatio
 | Render briefs | Templates | — | Section summaries | Executive narrative |
 
 Routing rule: **anything user-visible at quality goes to Claude; anything high-volume or quality-tolerant goes to Apple AI**. Migration is the only stage where both LLMs are active.
+
+### 13.1 Cognition module architecture (v0.8)
+
+For v1, the cognition router, all provider adapters, and all stage implementations live as **modules inside `loom-core`** at `loom_core/llm/` — not as a separate service. The blueprint's polyglot decomposition (cognition as a standalone service) is a v2 extraction path, not a v1 target.
+
+The v2 extraction trigger is a measurement, not an opinion: when the cost meter (`loom_core/llm/cost_meter.py`, issue #080) reports Claude API spend or per-call latency crossing a configurable threshold, the extraction is warranted. Until then, in-process cognition simplifies deployment and debugging.
+
+Module layout: `router.py` (routing matrix), `providers/` (four adapters: python_rules, embeddings, apple_fm, claude_api), `stages/` (atom_extraction, identity_match, state_inference, brief_compose, draft_compose, overrides), `adversarial.py` (boundary tags, §13.8), `extraction_discipline.py` (confidence + source-grounding, §13.9), `cost_meter.py` (§13.7). The routing policy is loaded from `skills/routing-policy.yaml` and is the subject of the quarterly audit (issue #091).
+
+**Privacy gate (§13.6):** private and stakeholder_set scoped facts never reach the Claude API tier. The router enforces this at call time by downshifting to Apple FM when the provider would otherwise be `claude_api`. A `LocalOnlyUnavailableError` is raised if no local provider can handle the stage — never silently downshifted to cloud.
 
 ---
 

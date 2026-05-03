@@ -440,23 +440,11 @@ CREATE TABLE work_engagement_metadata (
   ))
 );
 
--- Work-domain stakeholder roles. Roles are scoped per domain, hence per-projection table.
--- A stakeholder can hold roles at hypothesis, engagement, or arena scope.
-CREATE TABLE work_stakeholder_roles (
-  id                  TEXT PRIMARY KEY,
-  stakeholder_id      TEXT NOT NULL REFERENCES stakeholders(id),
-  scope_type          TEXT NOT NULL CHECK (scope_type IN ('hypothesis', 'engagement', 'arena')),
-  scope_id            TEXT NOT NULL,             -- polymorphic FK
-  role                TEXT NOT NULL CHECK (role IN (
-    'sponsor', 'beneficiary', 'blocker', 'validator',
-    'advocate', 'doer', 'influencer', 'advisor',
-    'decision_maker', 'informed_party', 'internal_advocate'
-  )),
-  effective_from      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  effective_to        TIMESTAMP
-);
-CREATE INDEX idx_wsr_stakeholder ON work_stakeholder_roles(stakeholder_id, effective_to);
-CREATE INDEX idx_wsr_scope ON work_stakeholder_roles(scope_type, scope_id, effective_to);
+-- Stakeholder roles live in the universal `stakeholder_roles` table (Section 6).
+-- The pre-v0.8 `work_stakeholder_roles` table was dropped in migration #076 — it
+-- had zero rows in any environment. Roles use the universal 10-role vocabulary
+-- from blueprint §4 (Stakeholders); affiliation (customer-side, AWS partner, 1CloudHub
+-- internal) is captured via `entity_tags` with the `aff/` namespace.
 
 -- Work-domain commitment direction (the actor topology specific to CRO motion).
 CREATE TABLE work_commitment_direction (
@@ -537,6 +525,233 @@ CREATE TABLE processor_runs (
 CREATE INDEX idx_proc_runs ON processor_runs(pipeline, started_at DESC);
 
 -- ============================================================================
+-- SECTION 6: v0.8 alignment additions
+-- ----------------------------------------------------------------------------
+-- These tables and columns are additive. They do not modify any existing table
+-- structure. The Alembic migration 2026_05_03_phaseA_001_v08_schema_alignment.py
+-- (revision c3a5f71d9e82) applies them in a single transaction; the ALTER
+-- statements below mirror that migration. The §1.5, §1.7, §1.8 new tables
+-- are created in this section directly (no ALTER form needed).
+-- All v0.8 additions reference loom-v08-refactor-plan.md for design rationale.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- §1.1 Visibility scope — column on every state-bearing entity (6 tables).
+-- Default 'private' until attached/promoted. Transitions at triage time.
+-- entity_visibility_members (below) holds the stakeholder set for 'stakeholder_set' scope.
+-- These ALTER statements mirror Alembic migration c3a5f71d9e82 (#076 Phase 1).
+-- ----------------------------------------------------------------------------
+ALTER TABLE events ADD COLUMN visibility_scope TEXT NOT NULL DEFAULT 'private'
+  CHECK (visibility_scope IN ('domain_wide', 'engagement_scoped', 'stakeholder_set', 'private'));
+ALTER TABLE atoms ADD COLUMN visibility_scope TEXT NOT NULL DEFAULT 'private'
+  CHECK (visibility_scope IN ('domain_wide', 'engagement_scoped', 'stakeholder_set', 'private'));
+ALTER TABLE hypotheses ADD COLUMN visibility_scope TEXT NOT NULL DEFAULT 'private'
+  CHECK (visibility_scope IN ('domain_wide', 'engagement_scoped', 'stakeholder_set', 'private'));
+ALTER TABLE artifacts ADD COLUMN visibility_scope TEXT NOT NULL DEFAULT 'private'
+  CHECK (visibility_scope IN ('domain_wide', 'engagement_scoped', 'stakeholder_set', 'private'));
+ALTER TABLE artifact_versions ADD COLUMN visibility_scope TEXT NOT NULL DEFAULT 'private'
+  CHECK (visibility_scope IN ('domain_wide', 'engagement_scoped', 'stakeholder_set', 'private'));
+ALTER TABLE external_references ADD COLUMN visibility_scope TEXT NOT NULL DEFAULT 'private'
+  CHECK (visibility_scope IN ('domain_wide', 'engagement_scoped', 'stakeholder_set', 'private'));
+
+CREATE TABLE entity_visibility_members (
+  entity_type     TEXT NOT NULL CHECK (entity_type IN (
+    'event', 'atom', 'hypothesis', 'artifact', 'artifact_version', 'external_reference'
+  )),
+  entity_id       TEXT NOT NULL,   -- polymorphic; no FK (SQLite cannot enforce across types)
+  stakeholder_id  TEXT NOT NULL REFERENCES stakeholders(id),
+  PRIMARY KEY (entity_type, entity_id, stakeholder_id)
+);
+CREATE INDEX idx_evm_lookup ON entity_visibility_members(entity_type, entity_id);
+
+-- ----------------------------------------------------------------------------
+-- §1.2 Retention tier — column on every state-bearing entity (7 tables).
+-- Per-table retention indexes support tier-scoped scans during sweep jobs.
+-- These ALTER statements mirror Alembic migration c3a5f71d9e82 (#076 Phase 1).
+-- ----------------------------------------------------------------------------
+ALTER TABLE events ADD COLUMN retention_tier TEXT NOT NULL DEFAULT 'operational'
+  CHECK (retention_tier IN ('operational', 'archive_soon', 'archived', 'purge_eligible'));
+CREATE INDEX idx_events_retention ON events(retention_tier);
+ALTER TABLE atoms ADD COLUMN retention_tier TEXT NOT NULL DEFAULT 'operational'
+  CHECK (retention_tier IN ('operational', 'archive_soon', 'archived', 'purge_eligible'));
+CREATE INDEX idx_atoms_retention ON atoms(retention_tier);
+ALTER TABLE hypotheses ADD COLUMN retention_tier TEXT NOT NULL DEFAULT 'operational'
+  CHECK (retention_tier IN ('operational', 'archive_soon', 'archived', 'purge_eligible'));
+CREATE INDEX idx_hypotheses_retention ON hypotheses(retention_tier);
+ALTER TABLE artifacts ADD COLUMN retention_tier TEXT NOT NULL DEFAULT 'operational'
+  CHECK (retention_tier IN ('operational', 'archive_soon', 'archived', 'purge_eligible'));
+CREATE INDEX idx_artifacts_retention ON artifacts(retention_tier);
+ALTER TABLE artifact_versions ADD COLUMN retention_tier TEXT NOT NULL DEFAULT 'operational'
+  CHECK (retention_tier IN ('operational', 'archive_soon', 'archived', 'purge_eligible'));
+CREATE INDEX idx_artifact_versions_retention ON artifact_versions(retention_tier);
+ALTER TABLE external_references ADD COLUMN retention_tier TEXT NOT NULL DEFAULT 'operational'
+  CHECK (retention_tier IN ('operational', 'archive_soon', 'archived', 'purge_eligible'));
+CREATE INDEX idx_external_references_retention ON external_references(retention_tier);
+ALTER TABLE engagements ADD COLUMN retention_tier TEXT NOT NULL DEFAULT 'operational'
+  CHECK (retention_tier IN ('operational', 'archive_soon', 'archived', 'purge_eligible'));
+CREATE INDEX idx_engagements_retention ON engagements(retention_tier);
+
+-- ----------------------------------------------------------------------------
+-- §1.3 Projection-at-creation — column on every entity (6 tables).
+-- Records which projection version the entity was created under. Survives
+-- projection swaps (CRO → CEO, 1CloudHub → next company).
+-- These ALTER statements mirror Alembic migration c3a5f71d9e82 (#076 Phase 1).
+-- ----------------------------------------------------------------------------
+ALTER TABLE arenas       ADD COLUMN projection_at_creation TEXT NOT NULL DEFAULT 'work-cro-1cloudhub-v1';
+ALTER TABLE engagements  ADD COLUMN projection_at_creation TEXT NOT NULL DEFAULT 'work-cro-1cloudhub-v1';
+ALTER TABLE hypotheses   ADD COLUMN projection_at_creation TEXT NOT NULL DEFAULT 'work-cro-1cloudhub-v1';
+ALTER TABLE events       ADD COLUMN projection_at_creation TEXT NOT NULL DEFAULT 'work-cro-1cloudhub-v1';
+ALTER TABLE atoms        ADD COLUMN projection_at_creation TEXT NOT NULL DEFAULT 'work-cro-1cloudhub-v1';
+ALTER TABLE artifacts    ADD COLUMN projection_at_creation TEXT NOT NULL DEFAULT 'work-cro-1cloudhub-v1';
+
+-- ----------------------------------------------------------------------------
+-- §1.4 Model-version metadata on inference-derived entities + atom retraction.
+-- Atoms: which extractor produced them, at what confidence, source span,
+--   and retraction state when invalidated.
+-- hypothesis_state_changes: which inference provider and model version.
+-- brief_runs: which skill version and provider chain.
+-- These ALTER statements mirror Alembic migration c3a5f71d9e82 (#076 Phase 1).
+-- ----------------------------------------------------------------------------
+ALTER TABLE atoms ADD COLUMN extractor_provider        TEXT CHECK (extractor_provider IS NULL OR
+  extractor_provider IN ('python_rules', 'embeddings', 'apple_fm', 'claude_api', 'human'));
+ALTER TABLE atoms ADD COLUMN extractor_model_version   TEXT;
+ALTER TABLE atoms ADD COLUMN extractor_skill_version   TEXT;
+ALTER TABLE atoms ADD COLUMN extraction_confidence     REAL;
+ALTER TABLE atoms ADD COLUMN source_span_start         INTEGER;
+ALTER TABLE atoms ADD COLUMN source_span_end           INTEGER;
+ALTER TABLE atoms ADD COLUMN retracted                 BOOLEAN NOT NULL DEFAULT 0;
+ALTER TABLE atoms ADD COLUMN retracted_at              TIMESTAMP;
+ALTER TABLE atoms ADD COLUMN retraction_reason         TEXT CHECK (retraction_reason IS NULL OR
+  retraction_reason IN ('hallucination', 'wrong_extraction', 'stale_source', 'corrected_on_review'));
+CREATE INDEX idx_atoms_retracted ON atoms(retracted) WHERE retracted = 1;
+
+ALTER TABLE hypothesis_state_changes ADD COLUMN inference_provider       TEXT;
+ALTER TABLE hypothesis_state_changes ADD COLUMN inference_model_version  TEXT;
+ALTER TABLE hypothesis_state_changes ADD COLUMN inference_skill_version  TEXT;
+
+ALTER TABLE brief_runs ADD COLUMN composer_skill_version TEXT;
+ALTER TABLE brief_runs ADD COLUMN provider_chain         JSON;
+
+-- ----------------------------------------------------------------------------
+-- §1.5 Stakeholder role periods — domain-agnostic, time-bounded
+-- Replaces work_stakeholder_roles, which is dropped in this migration. Roles
+-- use the universal 10-role enum from blueprint §4 (Stakeholders). Affiliation (which "side"
+-- a stakeholder represents) is captured separately via entity_tags with the
+-- `aff/` namespace prefix — affiliation is a property of the person, not of
+-- any role period. Issue #088 supersedes #039.
+-- ----------------------------------------------------------------------------
+CREATE TABLE stakeholder_roles (
+  id              TEXT PRIMARY KEY,
+  stakeholder_id  TEXT NOT NULL REFERENCES stakeholders(id),
+  domain          TEXT NOT NULL REFERENCES domains(id),
+  scope_type      TEXT NOT NULL CHECK (scope_type IN ('arena', 'engagement', 'domain')),
+  scope_id        TEXT,                  -- NULL when scope_type = 'domain'
+  role            TEXT NOT NULL CHECK (role IN (
+    'sponsor', 'beneficiary', 'blocker', 'validator',
+    'advocate', 'doer', 'influencer', 'advisor',
+    'decision_maker', 'informed_party'
+  )),
+  started_at      DATE NOT NULL,
+  ended_at        DATE,                  -- NULL = currently active
+  created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_sr_current ON stakeholder_roles(stakeholder_id, scope_id) WHERE ended_at IS NULL;
+CREATE INDEX idx_sr_scope ON stakeholder_roles(scope_type, scope_id, ended_at);
+
+-- ----------------------------------------------------------------------------
+-- §1.6 Audience profile on stakeholders.
+-- These ALTER statements mirror Alembic migration c3a5f71d9e82 (#076 Phase 1).
+-- ----------------------------------------------------------------------------
+ALTER TABLE stakeholders ADD COLUMN audience_schema    TEXT CHECK (audience_schema IS NULL OR
+  audience_schema IN ('executive', 'technical', 'aws_partner', 'customer_sponsor', 'visual'));
+ALTER TABLE stakeholders ADD COLUMN preferred_depth    TEXT;
+ALTER TABLE stakeholders ADD COLUMN preferred_channel  TEXT;
+ALTER TABLE stakeholders ADD COLUMN tone_notes         TEXT;
+
+-- ----------------------------------------------------------------------------
+-- §1.7 Forward-provenance index (atom_contributions)
+-- Backward provenance: state_change_evidence (state → atoms). Already present.
+-- Forward provenance: what did each atom contribute to (atom → consumers).
+-- ----------------------------------------------------------------------------
+CREATE TABLE atom_contributions (
+  atom_id         TEXT NOT NULL REFERENCES atoms(id),
+  consumer_type   TEXT NOT NULL CHECK (consumer_type IN (
+    'brief_run', 'state_change', 'draft', 'sent_action', 'derived_atom'
+  )),
+  consumer_id     TEXT NOT NULL,         -- polymorphic; no FK
+  contributed_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (atom_id, consumer_type, consumer_id)
+);
+CREATE INDEX idx_ac_consumer ON atom_contributions(consumer_type, consumer_id);
+-- Retraction columns on atoms (retracted, retracted_at, retraction_reason) are added in §1.4 above.
+
+-- ----------------------------------------------------------------------------
+-- §1.8 Resource and Resource-attribution entities (Leverage layer — blueprint §4, Resources)
+-- Inferred from calendar density, mailbox traffic, usage logs, etc.
+-- Manual entry ('inferred_from = manual') is the fallback, not the default.
+-- ----------------------------------------------------------------------------
+CREATE TABLE resources (
+  id                    TEXT PRIMARY KEY,
+  domain                TEXT NOT NULL REFERENCES domains(id),
+  category              TEXT NOT NULL CHECK (category IN (
+    'time', 'people', 'financial', 'attention',
+    'credibility', 'knowledge_asset', 'tooling_asset'
+  )),
+  name                  TEXT NOT NULL,
+  quantity              REAL,
+  quantity_unit         TEXT,
+  quality_dimensions    JSON,
+  window_start          DATE,
+  window_end            DATE,
+  expiry_at             DATE,
+  replenishment_rule    TEXT,
+  inferred_from         TEXT CHECK (inferred_from IS NULL OR inferred_from IN (
+    'calendar_density', 'mailbox_traffic', 'expense_reports',
+    'response_patterns', 'usage_logs', 'manual'
+  )),
+  visibility_scope      TEXT NOT NULL DEFAULT 'private'
+    CHECK (visibility_scope IN ('domain_wide', 'engagement_scoped', 'stakeholder_set', 'private')),
+  created_at            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_resources_category ON resources(domain, category);
+CREATE INDEX idx_resources_expiry ON resources(expiry_at) WHERE expiry_at IS NOT NULL;
+
+CREATE TABLE resource_attributions (
+  id              TEXT PRIMARY KEY,
+  resource_id     TEXT NOT NULL REFERENCES resources(id),
+  consumer_type   TEXT NOT NULL CHECK (consumer_type IN (
+    'hypothesis', 'engagement', 'draft', 'sent_action'
+  )),
+  consumer_id     TEXT NOT NULL,
+  quantity        REAL NOT NULL,
+  window_start    DATE NOT NULL,
+  window_end      DATE NOT NULL,
+  attributed_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  released_at     TIMESTAMP
+);
+CREATE INDEX idx_ra_resource ON resource_attributions(resource_id, released_at);
+CREATE INDEX idx_ra_consumer ON resource_attributions(consumer_type, consumer_id);
+
+-- Knowledge and tooling asset saturation tracking (which asset was used for which audience).
+CREATE TABLE asset_uses (
+  id                      TEXT PRIMARY KEY,
+  resource_id             TEXT NOT NULL REFERENCES resources(id),
+  audience_type           TEXT NOT NULL,
+  used_in_consumer_type   TEXT NOT NULL,
+  used_in_consumer_id     TEXT NOT NULL,
+  used_at                 TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_asset_uses ON asset_uses(resource_id, audience_type);
+
+-- ----------------------------------------------------------------------------
+-- §1.9 processor_runs.success — folded-in #009 fix.
+-- The success column was specced in #009 but never built; #076 Phase 1 folded
+-- the schema column in, and Phase 2 wired it through service + API.
+-- This ALTER mirrors Alembic migration c3a5f71d9e82.
+-- ----------------------------------------------------------------------------
+ALTER TABLE processor_runs ADD COLUMN success BOOLEAN NOT NULL DEFAULT 1;
+
+-- ============================================================================
 -- DESIGN NOTES
 -- ----------------------------------------------------------------------------
 -- 1. ID strategy: TEXT primary keys, generated by Loom Core.
@@ -550,7 +765,8 @@ CREATE INDEX idx_proc_runs ON processor_runs(pipeline, started_at DESC);
 --      (NDA-driven, IRAS-window, etc. — none in v1 work scope).
 --
 -- 3. Polymorphic references (entity_type + entity_id in entity_pages,
---    entity_tags, triage_items, work_stakeholder_roles.scope_id):
+--    entity_tags, triage_items, stakeholder_roles.scope_id,
+--    atom_contributions.consumer_id, entity_visibility_members.entity_id):
 --    SQLite can't enforce FK across polymorphic targets. Loom Core enforces
 --    referential integrity at write time. Trade-off accepted for simpler queries.
 --
@@ -562,9 +778,12 @@ CREATE INDEX idx_proc_runs ON processor_runs(pipeline, started_at DESC);
 --    (event_id, anchor_id) and (artifact_id, anchor_id). Anchor IDs scope
 --    to their parent page, not globally.
 --
--- 6. Provenance is structural: every state-bearing fact reaches source content
---    via FKs. atom -> event -> source_path. state_change -> atoms -> events.
---    No path is hidden in JSON or free text.
+-- 6. Provenance is structural through FKs where targets are uniform. Polymorphic
+--    targets (atom_contributions.consumer_id, state_change_evidence pre-FK,
+--    entity_visibility_members.entity_id) maintain integrity at the service
+--    layer per Note #3. The path is never hidden in JSON or free text.
+--    atom -> event -> source_path. state_change -> atoms -> events.
+--    atoms <- atom_contributions -> consumers (polymorphic).
 --
 -- 7. JSON columns (stakeholders.aliases, events.source_metadata): used only
 --    where shape varies legitimately by source. Indexed columns and CHECK

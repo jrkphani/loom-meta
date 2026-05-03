@@ -27,3 +27,21 @@ The LLM prompt includes: hypothesis title, description, current confidence, and 
 Lives in `loom-core/src/loom_core/pipelines/inference/confidence.py`. Calls `loom_core.llm.apple_ai` (primary) or `loom_core.llm.claude` (fallback).
 
 The reasoning stored in `hypothesis_state_changes.reasoning` should be plain English, not JSON. It is displayed verbatim in the triage UI and briefs.
+
+---
+
+## v0.8 Alignment Addendum
+
+**Depends on:** #076 (schema), #080 (cognition router), #081 (adversarial input), #083 (forward provenance)
+
+Under v0.8, confidence inference routes through `CognitionRouter.call_stage(stage='hypothesis_confidence', ...)`. The router applies the privacy gate: a hypothesis with private atoms cannot have its confidence inference go to claude_api; it stays on apple_fm or fails explicitly.
+
+### Additional acceptance criteria
+
+- [ ] Calls go through `CognitionRouter`, not direct LLM client calls.
+- [ ] Atom contents passed in the prompt are wrapped via `wrap_untrusted` (#081) — atoms originate from external sources (transcripts, emails) and remain adversarial-input.
+- [ ] The proposal row populates `inference_provider`, `inference_model_version`, `inference_skill_version`.
+- [ ] If any of the 5 most recent attached atoms have `visibility_scope = 'private'`, the privacy gate ensures the inference call goes to apple_fm only; never claude_api.
+- [ ] Retracted atoms are excluded from the prompt — confidence inference doesn't see hallucinated facts.
+- [ ] `record_contribution(consumer_type='state_change')` writes for every atom included in the inference prompt (per #083).
+

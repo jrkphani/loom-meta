@@ -27,3 +27,19 @@ The inference pipeline processes hypotheses one at a time (not batched) to avoid
 For cost control: only run confidence and momentum inference on hypotheses that have new atoms since the last inference run. Track `last_inferred_at` using the latest `hypothesis_state_changes.changed_at` where `changed_by = 'cron_inferred'`. Progress inference always runs (it's rules-based and cheap).
 
 Cron schedule from PRD §6.4: `state_inference` at 06:30 daily.
+
+---
+
+## v0.8 Alignment Addendum
+
+**Depends on:** #076 (schema), #086 (resource attribution), #089 (operations log), #090 (idempotency)
+
+The state_inference cron now also drives leverage attribution (#086) per hypothesis. The cron run is the single daily pass over every hypothesis: state inference + leverage attribution happen together, atomically per hypothesis.
+
+### Additional acceptance criteria
+
+- [ ] After progress/confidence/momentum inference completes for a hypothesis, `attribute_to_hypothesis(session, hypothesis_id, resources)` runs (#086) and writes `resource_attributions` rows.
+- [ ] Each `state_inference.run` op writes to the operations log (#089) with `op_type = 'state_inference.run'`, `op_id = ULID`, `inputs_hash` over the hypothesis_id list, status `started` then `completed` or `failed`.
+- [ ] The cron run uses an Idempotency-Key (#090) of `state_inference:YYYY-MM-DD` so a launchd-restart doesn't double-run on the same day.
+- [ ] On replay (#089), incomplete state_inference ops resume from where they left off (per-hypothesis idempotency keys).
+

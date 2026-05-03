@@ -26,3 +26,20 @@ The Apple AI client lives in `loom-core/src/loom_core/llm/apple_ai.py` (created 
 LLM routing principle (PRD §6.1): "Anything user-visible at quality → Claude; high-volume / quality-tolerant → Apple AI."
 
 Pipeline location: `loom-core/src/loom_core/pipelines/extractor_apple_ai.py`.
+
+---
+
+## v0.8 Alignment Addendum
+
+**Depends on:** #076 (schema), #080 (cognition router), #081 (adversarial input)
+
+The Apple AI tier under v0.8 routes through `CognitionRouter` rather than calling the `apple_ai` HTTP client directly. The privacy gate ensures `private` and `stakeholder_set` scopes can stay on Apple FM (the local provider) while `engagement_scoped` and `domain_wide` may use either Apple FM or a cloud fallback per matrix.
+
+### Additional acceptance criteria
+
+- [ ] Calls go through `CognitionRouter.call_stage(stage='atom_extraction_structured' | 'identity_match_fuzzy' | 'tone_shift_detection', ...)` rather than direct apple_ai HTTP client calls.
+- [ ] Source content for tag/summary stages is wrapped via `wrap_untrusted` (#081).
+- [ ] When the cognition router downshifts a Tier-3 stage to claude_api due to Apple FM unavailability, the privacy gate blocks the downshift if `visibility_scope in {'private', 'stakeholder_set'}` and surfaces an explicit failure rather than silently leaking.
+- [ ] When Apple FM HTTP is unavailable AND privacy gate blocks fallback, the stage returns a typed `LocalOnlyUnavailableError`; the caller logs at WARNING and queues for retry rather than crashing.
+- [ ] Atom rows produced via Apple FM populate `extractor_provider = 'apple_fm'` plus the model_version / skill_version / confidence fields.
+

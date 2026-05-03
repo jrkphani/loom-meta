@@ -29,3 +29,19 @@ The rules engine lives in `loom-core/src/loom_core/pipelines/inference/progress.
 `state_change_evidence` (lines ~129–133 in `loom-schema-v1.sql`) links the proposal change ID to atom IDs. Write these after the `hypothesis_state_changes` row is committed.
 
 Do not directly update `hypotheses.current_progress` — that is done by the human confirm/override (#006). The proposal is pending until Phani acts.
+
+---
+
+## v0.8 Alignment Addendum
+
+**Depends on:** #076 (schema), #077 (Audience), #083 (forward provenance)
+
+The rules-based progress engine routes through `CognitionRouter.call_stage(stage='hypothesis_progress', ...)` to keep model-version metadata uniform across all three inference dimensions — even though this stage is deterministic.
+
+### Additional acceptance criteria
+
+- [ ] The proposal `hypothesis_state_changes` row populates: `inference_provider = 'python_rules'`, `inference_model_version` (rules engine version), `inference_skill_version` (e.g., `progress-rules-v1`).
+- [ ] `state_change_evidence` rows feeding the proposal also trigger `record_contribution(consumer_type='state_change', consumer_id=state_change.id)` per #083.
+- [ ] The progress engine reads atoms via `list_atoms_for_hypothesis(session, hypothesis_id, audience=Audience.for_self())` — self-audience because state inference is internal cognition; the result is filtered by visibility for downstream consumers (briefs).
+- [ ] Retracted atoms (`atoms.retracted = 1`) are excluded from the inference. If a retracted atom previously contributed to a state change, the cascade in #084 handles surfacing the affected state change.
+

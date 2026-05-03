@@ -24,3 +24,19 @@ The rules extractor checks: (1) YAML frontmatter `type` field, (2) file extensio
 Lives in `loom-core/src/loom_core/pipelines/extractor_rules.py`.
 
 For v1 work domain, the most common structured input is a quick note typed in Obsidian Mobile with frontmatter. The Git commit and CSV extraction are implemented but may not be used in v1's daily workflow; they are included for completeness.
+
+---
+
+## v0.8 Alignment Addendum
+
+**Depends on:** #076 (schema), #080 (cognition router), #083 (forward provenance)
+
+The rules tier is the only extractor where `extraction_confidence = 1.0` is correct (deterministic parse). It still routes through `CognitionRouter.call_stage(stage='atom_extraction_structured', ...)` so the cost meter, privacy gate, and provenance hooks apply uniformly even for the free local tier.
+
+### Additional acceptance criteria
+
+- [ ] Calls route through `CognitionRouter` with `Provider.PYTHON_RULES` adapter; no direct parse-and-persist.
+- [ ] Atom rows populate `extractor_provider = 'python_rules'`, `extractor_skill_version` (e.g., `frontmatter-parser-v1`), `extraction_confidence = 1.0`, `source_span_start`/`source_span_end` (the byte offsets of the parsed block in the source file), `visibility_scope`, `projection_at_creation`.
+- [ ] Source-grounding verification (#082) is skipped for rules-tier atoms (deterministic parse already implies grounding); this is a documented exception in the verifier wrapper.
+- [ ] Forward provenance hooks are called per #083 when the rules-extracted atom feeds any consumer.
+

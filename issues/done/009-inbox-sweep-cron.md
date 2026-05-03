@@ -1,5 +1,7 @@
 # 009 — inbox_sweep cron job wiring
 
+> FOLLOW-UP: `processor_runs.success` column completion folded into #076 (gap inherited from prior session, caught by TDD STOP during #009 cron implementation in subsequent session).
+
 **Workstream:** W3
 **Tag:** AFK
 **Blocked by:** #008

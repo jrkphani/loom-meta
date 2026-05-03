@@ -26,3 +26,21 @@ The narrative is appended to the `## At a glance` section of the brief, not as a
 Route: the narrative generation is internal to the brief service; no new API endpoint is needed.
 
 Per PRD §9 (testing decisions): the Claude API is mocked at the SDK boundary in all non-external tests.
+
+---
+
+## v0.8 Alignment Addendum
+
+**Depends on:** #080 (cognition router), #081 (adversarial input), #039 (audience profile)
+
+The Claude narrative under v0.8 routes through `CognitionRouter.call_stage(stage='executive_narrative' | 'tactical_brief' | 'section_summaries', ...)`. The stage choice depends on the audience profile (#039): `executive` schema → `executive_narrative`; `technical` schema → `tactical_brief`; `aws_partner` schema → a partner-tailored stage.
+
+### Additional acceptance criteria
+
+- [ ] Calls go through `CognitionRouter`, not direct Anthropic SDK calls.
+- [ ] When the brief is for a stakeholder with a defined `audience_schema`, the matching cognition stage is selected; default is `executive_narrative`.
+- [ ] Atom contents passed to the narrative prompt are wrapped via `wrap_untrusted` (#081) since they originate from external sources.
+- [ ] Privacy gate enforced: a brief whose atom set includes any `visibility_scope='private'` atom is composed via `apple_fm` only — even if the matrix would normally route to `claude_api`.
+- [ ] When the privacy gate forces a downshift and Apple FM is unavailable, the brief renders with the existing template-only fallback (the original AC continues to hold).
+- [ ] `provider_chain` field on `brief_runs` records every cognition stage + provider used during composition.
+
