@@ -27,6 +27,7 @@ The endpoint is `POST /v1/atoms/:id/retract` with `{reason}`. The retraction ser
 - [ ] An integration test seeds: an atom contributing to a brief and a state change; calls retract; asserts the brief is flagged for regen, the state-change atoms list is updated, and the operations log records the retraction.
 - [ ] Unit tests cover: cycle-safety (an atom whose derived atom transitively retracts itself doesn't loop); already-retracted returns 409; cascade collects all consumer types correctly.
 - [ ] All four CI gates pass.
+- [ ] Visibility regression test `test_retracted_entity_excluded` lands in `loom-core/tests/test_visibility_invariants.py` with `@pytest.mark.visibility` (module-level marker already in place from #079). Test asserts that retracted atoms are excluded from read-path results regardless of audience, including for `Audience.for_self()`.
 
 ## Notes
 

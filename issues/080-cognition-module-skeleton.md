@@ -28,6 +28,7 @@ For v1 the module lives inside loom-core; the blueprint-suggested separate cogni
 - [ ] `Provider.CLAUDE_API` adapter wraps `anthropic.AsyncAnthropic` with the existing `ANTHROPIC_API_KEY` env var; mockable at the SDK boundary in tests.
 - [ ] Unit tests in `tests/llm/test_router.py` cover: stage routes to configured provider; private-scope downshift to apple_fm; private-scope when apple_fm unavailable raises `LocalOnlyUnavailableError`; matrix loaded from YAML matches expectations.
 - [ ] All four CI gates pass.
+- [ ] Visibility regression test `test_audience_filtered_summary_uses_filtered_atoms` lands in `loom-core/tests/test_visibility_invariants.py` with `@pytest.mark.visibility` (module-level marker already in place from #079). Test asserts that summary read paths use the audience-filtered atom set, not the unfiltered set.
 
 ## Notes
 
