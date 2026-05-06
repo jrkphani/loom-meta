@@ -17,6 +17,7 @@ Commitments, asks, and risks have a lifecycle tracked through status transitions
 - [ ] `PATCH /v1/atoms/:id/commitment` updates `due_date` and `owner_stakeholder_id` on `atom_commitment_details`.
 - [ ] `PATCH /v1/atoms/:id/risk` updates `severity` and `owner_stakeholder_id` on `atom_risk_details`.
 - [ ] Service tests: update commitment from open → in_progress → met; update ask from raised → granted; update risk severity.
+- [ ] The `current_status` field on `AtomCommitmentDetails` (lifecycle of commitment atoms specifically) is the lifecycle target for commitment-kind atoms in this issue. Rules-tier extractor (#012) creates the aux record with the schema's default; lifecycle transitions land here. Test fixtures may mirror the minimal-Stakeholder shape from `tests/pipelines/test_extractor_rules.py` (three fields inline: `id`, `canonical_name`, `primary_email`).
 
 ## Notes
 

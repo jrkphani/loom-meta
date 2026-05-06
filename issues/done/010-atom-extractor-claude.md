@@ -20,6 +20,16 @@ Given a newly created event with `source_path` pointing to a transcript or note,
 - [ ] Unit tests use a mocked Claude SDK client (not real API calls); a snapshot test asserts atom types and anchor IDs from a fixture transcript.
 - [ ] All four CI gates pass with the mocked Claude client.
 
+### Patterns inherited from #012 (locked)
+
+Three locked patterns from the rules-tier extractor apply to the LLM-tier extractor as well:
+
+- **Signature.** `process_file(session: AsyncSession, path: Path, vault_path: Path) -> list[Atom]`. Session is read-only; caller owns persistence. Same uniform-signature trade as #012.
+- **Aux records via `relationship()`.** Commitment atoms emitted by the LLM tier attach `AtomCommitmentDetails` via the bidirectional relationship landed in #012. No new aux-record plumbing needed.
+- **Cross-reference resolution at extraction.** When the LLM produces an `owner_email`, perform the same `Stakeholder.primary_email` exact-match lookup; persist `owner_stakeholder_id` or `NULL`. Fuzzy / multi-candidate resolution remains out of scope (#042 / #043).
+
+The LLM tier may emit kinds the rules tier doesn't cover. Each new kind that has a kind-specific aux table follows the same pattern: bidirectional relationship on `Atom`, attach via the relationship before return, caller cascades.
+
 ## Notes
 
 The Claude client lives in `loom-core/src/loom_core/llm/claude.py`. Use `anthropic.AsyncAnthropic` with the `ANTHROPIC_API_KEY` env var. Mock at the SDK boundary in tests (inject the client).

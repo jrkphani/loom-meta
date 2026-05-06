@@ -36,7 +36,7 @@ Route: `POST /v1/atom-attachments`, `DELETE /v1/atom-attachments/:id`, `PATCH /v
 ### Additional acceptance criteria
 
 - [ ] Attaching an atom records a forward-provenance row via `record_contribution` (#083) with `consumer_type = 'state_change'` if the attach event triggers a downstream state change. (For pure attaches without state change, no contribution row — contribution is recorded by the consumer that actually uses the atom.)
-- [ ] On attach, the atom's `visibility_scope` is reconciled with the hypothesis's: if the atom was `private` (pre-attachment default), it transitions to the hypothesis's scope (typically `engagement_scoped`). The transition is logged.
+- [ ] On attach, the atom's `visibility_scope` is reconciled with the hypothesis's: if the atom was `private` (pre-attachment default), it transitions to the hypothesis's scope (typically `engagement_scoped`). The transition is logged. The promotion-on-attach pattern is deliberately distinct from the resolution-at-extraction pattern locked in #012: stakeholder resolution is a deterministic DB read done at extraction time; visibility promotion is a user-driven state transition done at attach time. See #012 closure note for the contrast.
 - [ ] `GET /v1/hypotheses/:id/attachments` takes a required audience parameter via the visibility-aware read-path retrofit (#078); attachments with `visibility_scope` not visible to the audience are excluded.
 - [ ] Attaching a retracted atom (#084) returns 409 with reason `atom_retracted`.
 
